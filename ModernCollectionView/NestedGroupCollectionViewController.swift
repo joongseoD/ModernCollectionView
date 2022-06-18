@@ -8,21 +8,46 @@
 import UIKit
 
 final class NestedGroupCollectionViewController: UIViewController {
+    let headerRegistration: UICollectionView.SupplementaryRegistration<TitleHeaderReusableView> = {
+        return .init(elementKind: "title") {
+            (supplementaryView, string, indexPath) in
+            supplementaryView.label.text = "\(string) for section \(indexPath.section)"
+            supplementaryView.backgroundColor = .lightGray
+            supplementaryView.layer.borderColor = UIColor.black.cgColor
+            supplementaryView.layer.borderWidth = 1.0
+        }
+    }()
     let collectionView: UICollectionView = {
         let layout = UICollectionViewLayout.nestedLayout
         let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.translatesAutoresizingMaskIntoConstraints = false
-        collectionView.register(Cell.self, forCellWithReuseIdentifier: "cell")
+        
+        CellTypes.allCases.forEach { collectionView.register($0.cellType, forCellWithReuseIdentifier: $0.reuseIdentifier) }
         return collectionView
     }()
     
-    lazy var datasource: UICollectionViewDiffableDataSource<SectionLayout, Int> = {
-        return .init(collectionView: collectionView) { collectionView, indexPath, itemIdentifier in
-            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "cell", for: indexPath) as! Cell
-            cell.label.text = "\(itemIdentifier)"
-            cell.backgroundColor = .red
+    lazy var datasource: UICollectionViewDiffableDataSource<SectionLayout, CellTypes> = {
+        let datasource = UICollectionViewDiffableDataSource<SectionLayout, CellTypes>(collectionView: collectionView) { collectionView, indexPath, itemIdentifier in
+            let cell = collectionView.dequeueReusableCell(
+                withReuseIdentifier: itemIdentifier.reuseIdentifier,
+                for: indexPath
+            ) as! CellType
+            cell.setViewModel(itemIdentifier.viewModel)
             return cell
         }
+        
+        datasource.supplementaryViewProvider = { [weak self] collectionView, elementKind, indexPath in
+            guard let self = self else { fatalError() }
+            let section = datasource.snapshot().sectionIdentifiers[indexPath.section]
+            print("#### ", elementKind)
+            
+            return collectionView.dequeueConfiguredReusableSupplementary(
+                using: self.headerRegistration,
+                for: indexPath
+            )
+        }
+        
+        return datasource
     }()
     
     override func viewDidLoad() {
@@ -43,16 +68,13 @@ final class NestedGroupCollectionViewController: UIViewController {
     }
     
     private func updateData() {
-        var snapshot = NSDiffableDataSourceSnapshot<SectionLayout, Int>()
-        snapshot.appendSections([
-            .panel,
-            .albums,
-            .curation
-        ])
-        // 섹션 별로 아이템 넣어줘야 함
-        snapshot.appendItems([0, 1, 2, 3], toSection: .panel)
-        snapshot.appendItems([4, 5, 6, 7, 8, 9, 10], toSection: .albums)
-        snapshot.appendItems([11, 12, 13, 14, 15, 16], toSection: .curation)
+        var snapshot = NSDiffableDataSourceSnapshot<SectionLayout, CellTypes>()
+        let sections = SectionLayout.allCases
+        snapshot.appendSections(sections)
+        sections.forEach { section in
+            let items = section.viewModel.cellViewModels.map { $0.type }
+            snapshot.appendItems(items, toSection: section)
+        }
         datasource.apply(snapshot, animatingDifferences: true, completion: nil)
     }
 }
@@ -82,118 +104,8 @@ extension UICollectionViewLayout {
     
     static var nestedLayout: UICollectionViewLayout {
         return UICollectionViewCompositionalLayout { sectionIndex, layoutEnvironment in
-            return SectionLayout(rawValue: sectionIndex)?.layout()
+            guard let layout = SectionLayout(index: sectionIndex) else { return nil }
+            return SectionLayoutProvider(section: layout).layout
         }
-    }
-}
-
-class Cell: UICollectionViewCell {
-    let label = UILabel()
-    
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        
-        label.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
-        ])
-    }
-    
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-}
-
-
-enum SectionLayout: Int {
-    case panel
-    case albums
-    case curation
-    
-    func layout() -> NSCollectionLayoutSection {
-        let provider = SectionLayoutProvider()
-        switch self {
-        case .panel:
-            return provider.panel()
-        case .albums:
-            return provider.album()
-        case .curation:
-            return provider.curation()
-        }
-    }
-}
-
-struct SectionLayoutProvider {
-    func panel() -> NSCollectionLayoutSection {
-        let item = NSCollectionLayoutItem(
-            layoutSize: NSCollectionLayoutSize(
-                widthDimension: .fractionalWidth(1),
-                heightDimension: .fractionalHeight(1)
-            )
-        )
-        let groupSize = NSCollectionLayoutSize(
-            widthDimension: .fractionalWidth(1),
-            heightDimension: .absolute(150)
-        )
-        let group = NSCollectionLayoutGroup.horizontal(
-            layoutSize: groupSize,
-            subitem: item,
-            count: 1
-        )
-        group.interItemSpacing = .fixed(10)
-        let section = NSCollectionLayoutSection(group: group)
-        section.orthogonalScrollingBehavior = .paging
-        
-        return section
-    }
-    
-    func album() -> NSCollectionLayoutSection {
-        let item = NSCollectionLayoutItem(
-            layoutSize: NSCollectionLayoutSize(
-                widthDimension: .fractionalWidth(1),
-                heightDimension: .fractionalWidth(1)
-            )
-        )
-        
-        let groupSize = NSCollectionLayoutSize(
-            widthDimension: .fractionalWidth(0.23),
-            heightDimension: .fractionalWidth(0.23)
-        )
-        let group = NSCollectionLayoutGroup.horizontal(
-            layoutSize: groupSize,
-            subitem: item,
-            count: 1
-        )
-        group.contentInsets = .init(top: 10, leading: 10, bottom: 10, trailing: 10)
-        let section = NSCollectionLayoutSection(group: group)
-        section.orthogonalScrollingBehavior = .continuous
-        return section
-    }
-    
-    func curation() -> NSCollectionLayoutSection {
-        let item = NSCollectionLayoutItem(
-            layoutSize: NSCollectionLayoutSize(
-                widthDimension: .fractionalWidth(1),
-                heightDimension: .fractionalWidth(1)
-            )
-        )
-        
-        let groupSize = NSCollectionLayoutSize(
-            widthDimension: .fractionalWidth(0.45),
-            heightDimension: .fractionalHeight(0.5)
-        )
-        let group = NSCollectionLayoutGroup.vertical(
-            layoutSize: groupSize,
-            subitem: item,
-            count: 2
-        )
-        group.contentInsets = .init(top: 10, leading: 10, bottom: 10, trailing: 10)
-        group.interItemSpacing = .fixed(10)
-        
-        let section = NSCollectionLayoutSection(group: group)
-        section.orthogonalScrollingBehavior = .continuous
-        return section
     }
 }
